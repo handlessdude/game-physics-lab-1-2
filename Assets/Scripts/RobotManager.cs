@@ -9,6 +9,10 @@ public class RobotManager : MonoBehaviour
     RobotJoint[] joints;
     public bool useForwardKinematics = true;
     
+    public float samplingDistance = 0.08f;
+    public float learningRate = 42f;
+    public float distanceThreshold = 0.2f;
+    
     private void Awake()
     {
         joints = GetComponentsInChildren<RobotJoint>();
@@ -26,7 +30,11 @@ public class RobotManager : MonoBehaviour
         }
         else
         {
-            // TODO: implement inverse kinematics
+            InverseKinematics(endEffector.transform.position, angles);
+            for (int i = 0; i < joints.Length; i++)
+            {
+                joints[i].transform.localRotation = Quaternion.AngleAxis(angles[i], joints[i].Axis);
+            }
         }
     }
     
@@ -41,9 +49,46 @@ public class RobotManager : MonoBehaviour
             // Rotates around a new axis
             rotation *= Quaternion.AngleAxis(angles[i - 1], joints[i - 1].Axis);
             Vector3 nextPoint = prevPoint + rotation * joints[i].StartOffset;
-    
+            Debug.DrawLine(prevPoint, nextPoint, Color.white, 0.1f);
             prevPoint = nextPoint;
         }
         return prevPoint;
+    }
+    
+    public float DistanceFromTarget(Vector3 target, float [] angles)
+    {
+        Vector3 point = ForwardKinematics(angles);
+        return Vector3.Distance(point, target);
+    }
+    
+    public float PartialGradient (Vector3 target, float[] angles, int i)
+    {
+        // Saves the angle,
+        // it will be restored later
+        float angle = angles[i];
+        // Gradient : [F(x+SamplingDistance) - F(x)] / h
+        float f_x = DistanceFromTarget(target, angles);
+        angles[i] += samplingDistance;
+        float f_x_plus_d = DistanceFromTarget(target, angles);
+        float gradient = (f_x_plus_d - f_x) / samplingDistance;
+        // Restores
+        angles[i] = angle;
+        return gradient;
+    }
+    
+    public void InverseKinematics (Vector3 target, float [] angles)
+    {
+        if (DistanceFromTarget(target, angles) < distanceThreshold) return;
+        for (int i = joints.Length -1; i >= 0; i --)
+        {
+            // Gradient descent
+            // Update : Solution -= LearningRate * Gradient
+            float gradient = PartialGradient(target, angles, i);
+            angles[i] -= learningRate * gradient;
+            // Clamp ? does not work
+            // angles[i] = Mathf.Clamp(angles[i], joints[i].MinAngle, joints[i].MaxAngle);
+            // Early termination
+            if (DistanceFromTarget(target, angles) < distanceThreshold) return;
+        }
     }
 }
